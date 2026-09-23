@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bill Manager</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --border: #e2e5ea; --text: #1f2430;
+    --muted: #6b7280; --accent: #2f6fed; --accent-dark: #1f4fbf;
+    --good: #1a9c5c; --bad: #d1483f; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); }
+  .hidden { display: none !important; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+
+  .field { margin-bottom: 14px; }
+  .field label { display:block; font-size: 13px; margin-bottom: 4px; color: var(--muted); }
+  .field input, .field select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+  .btn { display:inline-block; padding: 10px 16px; border-radius: 8px; border: none; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn:hover { background: var(--accent-dark); }
+  .btn.secondary { background: #eef1f6; color: var(--text); }
+  .btn.secondary:hover { background: #e2e6ee; }
+  .btn.full { width: 100%; }
+  .btn.small { padding: 6px 10px; font-size: 12px; }
+  .link-btn { background:none; border:none; color: var(--accent); cursor:pointer; font-size: 13px; padding:0; }
+  .error-msg { background:#fdecea; color: var(--bad); padding: 8px 10px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+
+  /* App shell */
+  header.app-header { display:flex; align-items:center; justify-content:space-between; padding: 14px 16px; background: var(--card); border-bottom: 1px solid var(--border); position:sticky; top:0; z-index:5; }
+  header.app-header h1 { font-size: 16px; margin:0; }
+
+  .card { background: var(--card); border:1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+  .row { display:flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 130px; }
+
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  td input[type="number"], td input[type="text"] { width: 100%; padding: 4px 6px; border:1px solid var(--border); border-radius: 6px; font-size: 13px; }
+
+  .bill-row { display:flex; justify-content:space-between; align-items:center; padding: 10px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .bill-row:last-child { border-bottom: none; }
+  .bill-row .meta { font-size: 13px; }
+  .bill-row .meta .vendor { font-weight: 600; }
+  .bill-row .meta .date { color: var(--muted); }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 600; }
+  .badge.verified { background: #e4f7ec; color: var(--good); }
+  .badge.unverified { background: #fdeeea; color: var(--bad); }
+
+  .bill-detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .muted { color: var(--muted); }
+  .totals { font-size: 13px; margin-top: 8px; }
+  .totals div { display:flex; justify-content:space-between; padding: 2px 0; }
+
+  #uploadArea { border: 2px dashed var(--border); border-radius: var(--radius); padding: 24px; text-align:center; cursor:pointer; }
+  #uploadArea.dragover { border-color: var(--accent); background: #f0f5ff; }
+  #uploadArea p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  #previewImg { max-width: 100%; max-height: 160px; border-radius: 8px; margin-top: 10px; }
+
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #222; color:#fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 50; }
+</style>
+</head>
+<body>
+
+<!-- ===================== MAIN APP ===================== -->
+<div id="appScreen">
+  <header class="app-header">
+    <h1>🧾 Bill Manager</h1>
+  </header>
+
+  <div class="wrap">
+
+    <!-- Scan / Upload -->
+    <div class="card">
+      <h2>Scan / Upload Bill</h2>
+      <div id="uploadArea">
+        <div>📷</div>
+        <strong>Click to upload</strong> a bill (JPG, PNG, or PDF)
+        <p>We'll extract vendor, date, GST, totals and line items automatically.</p>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,application/pdf" class="hidden">
+      </div>
+      <img id="previewImg" class="hidden">
+      <div id="scanStatus" class="muted" style="margin-top:10px; font-size:13px;"></div>
+
+      <div id="reviewSection" class="hidden" style="margin-top:16px;">
+        <h2>Review Extracted Data</h2>
+        <div class="row">
+          <div class="field"><label>Vendor</label><input type="text" id="rVendor"></div>
+          <div class="field"><label>Date</label><input type="text" id="rDate" placeholder="YYYY-MM-DD"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Invoice #</label><input type="text" id="rInvoice"></div>
+          <div class="field"><label>GST</label><input type="number" id="rGst" step="0.01"></div>
+          <div class="field"><label>Total</label><input type="number" id="rTotal" step="0.01"></div>
+        </div>
+        <table>
+          <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Unit ₹</th><th>Total ₹</th></tr></thead>
+          <tbody id="rItemsBody"></tbody>
+        </table>
+        <button class="btn" id="saveBillBtn" style="margin-top:12px;">Save Bill</button>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="card">
+      <h2>Search Bills</h2>
+      <div class="row">
+        <div class="field"><label>From date</label><input type="date" id="fromDate"></div>
+        <div class="field"><label>To date</label><input type="date" id="toDate"></div>
+      </div>
+      <div class="field">
+        <label>Vendor</label>
+        <select id="vendorSelect"><option>All Vendors</option></select>
+      </div>
+      <button class="btn full" id="searchBtn">Search</button>
+    </div>
+
+    <!-- Results -->
+    <div class="card">
+      <h2>Results</h2>
+      <div id="resultsList" class="muted" style="font-size:13px;">Run a search to see bills.</div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+let extractedData = null;
+let lastFile = null;
+let expandedBillId = null;
+
+function showToast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  setTimeout(() => t.classList.add('hidden'), 3000);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api/' + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+loadVendors();
+
+/* ---------------- UPLOAD / SCAN ---------------- */
+$('#uploadArea').addEventListener('click', () => $('#fileInput').click());
+$('#fileInput').addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleFile(file) {
+  lastFile = file;
+  if (file.type.startsWith('image/')) {
+    $('#previewImg').src = URL.createObjectURL(file);
+    $('#previewImg').classList.remove('hidden');
+  } else {
+    $('#previewImg').classList.add('hidden');
+  }
+  $('#scanStatus').textContent = 'Scanning with Azure Document Intelligence… this can take up to ~30s.';
+  $('#reviewSection').classList.add('hidden');
+
+  try {
+    const fileBase64 = await fileToBase64(file);
+    const data = await api('scan-bill', {
+      method: 'POST',
+      body: JSON.stringify({ fileBase64, contentType: file.type }),
+    });
+    extractedData = data.extracted;
+    $('#scanStatus').textContent = 'Extraction complete. Review and edit below before saving.';
+    populateReview(extractedData);
+  } catch (err) {
+    $('#scanStatus').textContent = 'Scan failed: ' + err.message;
+  }
+}
+
+function populateReview(d) {
+  $('#rVendor').value = d.vendorName || '';
+  $('#rDate').value = d.purchaseDate || '';
+  $('#rInvoice').value = d.invoiceNumber || '';
+  $('#rGst').value = d.gst ?? '';
+  $('#rTotal').value = d.total ?? '';
+
+  const body = $('#rItemsBody');
+  body.innerHTML = '';
+  (d.items || []).forEach((item, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" data-i="${i}" data-f="name" value="${item.name || ''}"></td>
+      <td><input type="number" step="0.01" data-i="${i}" data-f="quantity" value="${item.quantity ?? ''}"></td>
+      <td><input type="text" data-i="${i}" data-f="unit" value="${item.unit || ''}"></td>
+      <td><input type="number" step="0.01" data-i="${i}" data-f="unitPrice" value="${item.unitPrice ?? ''}"></td>
+      <td><input type="number" step="0.01" data-i="${i}" data-f="totalPrice" value="${item.totalPrice ?? ''}"></td>
+    `;
+    body.appendChild(tr);
+  });
+  $('#reviewSection').classList.remove('hidden');
+}
+
+$('#saveBillBtn').addEventListener('click', async () => {
+  const items = [];
+  document.querySelectorAll('#rItemsBody tr').forEach((tr) => {
+    const get = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    items.push({
+      name: get('name'),
+      quantity: get('quantity') ? parseFloat(get('quantity')) : null,
+      unit: get('unit'),
+      unitPrice: get('unitPrice') ? parseFloat(get('unitPrice')) : null,
+      totalPrice: get('totalPrice') ? parseFloat(get('totalPrice')) : null,
+    });
+  });
+
+  const payload = {
+    vendorName: $('#rVendor').value.trim(),
+    purchaseDate: $('#rDate').value.trim() || null,
+    invoiceNumber: $('#rInvoice').value.trim() || null,
+    gst: $('#rGst').value ? parseFloat($('#rGst').value) : null,
+    total: $('#rTotal').value ? parseFloat($('#rTotal').value) : null,
+    items,
+  };
+
+  if (!payload.vendorName) return showToast('Vendor name is required');
+
+  try {
+    await api('bills-save', { method: 'POST', body: JSON.stringify(payload) });
+    showToast('Bill saved!');
+    $('#reviewSection').classList.add('hidden');
+    $('#previewImg').classList.add('hidden');
+    $('#scanStatus').textContent = '';
+    loadVendors();
+  } catch (err) {
+    showToast('Save failed: ' + err.message);
+  }
+});
+
+/* ---------------- VENDORS + SEARCH ---------------- */
+async function loadVendors() {
+  try {
+    const data = await api('vendors-list');
+    const sel = $('#vendorSelect');
+    sel.innerHTML = '<option>All Vendors</option>' + data.vendors.map((v) => `<option>${v}</option>`).join('');
+  } catch {}
+}
+
+$('#searchBtn').addEventListener('click', runSearch);
+
+async function runSearch() {
+  const from = $('#fromDate').value;
+  const to = $('#toDate').value;
+  const vendor = $('#vendorSelect').value;
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (vendor) params.set('vendor', vendor);
+
+  $('#resultsList').innerHTML = 'Searching…';
+  try {
+    const data = await api('bills-list?' + params.toString());
+    renderResults(data.bills);
+  } catch (err) {
+    $('#resultsList').textContent = 'Search failed: ' + err.message;
+  }
+}
+
+function renderResults(bills) {
+  const container = $('#resultsList');
+  if (!bills.length) { container.innerHTML = '<p class="muted">No bills found for this filter.</p>'; return; }
+  container.innerHTML = '';
+  bills.forEach((b) => {
+    const row = document.createElement('div');
+    row.innerHTML = `
+      <div class="bill-row" data-id="${b.id}">
+        <div class="meta">
+          <div class="vendor">${b.vendor_name}</div>
+          <div class="date">${b.purchase_date || ''}</div>
+        </div>
+        <div style="text-align:right;">
+          <div>₹${Number(b.total || 0).toFixed(2)}</div>
+          <span class="badge ${b.verified ? 'verified' : 'unverified'}">${b.verified ? '✓ VERIFIED' : '⚠ NOT VERIFIED'}</span>
+        </div>
+      </div>
+      <div class="bill-detail hidden" id="detail-${b.id}"></div>
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll('.bill-row').forEach((el) => {
+    el.addEventListener('click', () => toggleDetail(el.dataset.id));
+  });
+}
+
+async function toggleDetail(id) {
+  const detail = $('#detail-' + id);
+  if (expandedBillId === id) {
+    detail.classList.add('hidden');
+    expandedBillId = null;
+    return;
+  }
+  document.querySelectorAll('.bill-detail').forEach((d) => d.classList.add('hidden'));
+  expandedBillId = id;
+  detail.classList.remove('hidden');
+  detail.innerHTML = 'Loading…';
+
+  try {
+    const data = await api('bills-get?id=' + id);
+    renderDetail(detail, data.bill, data.items);
+  } catch (err) {
+    detail.textContent = 'Failed to load: ' + err.message;
+  }
+}
+
+function renderDetail(container, bill, items) {
+  container.innerHTML = `
+    <div class="muted" style="font-size:13px;">Bill #${bill.invoice_number || '—'}</div>
+    <table>
+      <thead><tr><th>Item</th><th>Qty</th><th>Purchase ₹</th><th>Selling ₹</th><th>✓</th></tr></thead>
+      <tbody>
+        ${items.map((it) => `
+          <tr data-item="${it.id}">
+            <td>${it.name}${it.unit ? ' (' + it.quantity + ' ' + it.unit + ')' : ''}</td>
+            <td>${it.quantity ?? '—'}</td>
+            <td>₹${Number(it.unit_price || 0).toFixed(2)}</td>
+            <td><input type="number" step="0.01" class="sellPriceInput" value="${it.selling_price ?? ''}" placeholder="Set price"></td>
+            <td><input type="checkbox" class="verifyCheckbox" ${it.physically_verified ? 'checked' : ''}></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <div class="totals">
+      <div><span>GST</span><span>₹${Number(bill.gst || 0).toFixed(2)}</span></div>
+      <div><span>Total</span><span>₹${Number(bill.total || 0).toFixed(2)}</span></div>
+    </div>
+  `;
+
+  container.querySelectorAll('tr[data-item]').forEach((tr) => {
+    const itemId = tr.dataset.item;
+    tr.querySelector('.verifyCheckbox').addEventListener('change', async (e) => {
+      try {
+        await api('bills-verify', { method: 'POST', body: JSON.stringify({ itemId, verified: e.target.checked }) });
+        showToast('Verification updated');
+        runSearch(); // refresh badges
+      } catch (err) { showToast('Failed: ' + err.message); }
+    });
+    tr.querySelector('.sellPriceInput').addEventListener('change', async (e) => {
+      const val = parseFloat(e.target.value);
+      if (isNaN(val)) return;
+      try {
+        await api('items-price', { method: 'POST', body: JSON.stringify({ itemId, sellingPrice: val }) });
+        showToast('Selling price saved');
+      } catch (err) { showToast('Failed: ' + err.message); }
+    });
+  });
+}
+</script>
+</body>
+</html>

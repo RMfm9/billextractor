@@ -1,0 +1,11 @@
+{
+  "name": "bill-manager",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bill scanning, verification and pricing app (Vercel + Azure Document Intelligence + Vercel Postgres + Vercel Blob)",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/blob": "^2.8.0"
+  }
+}
