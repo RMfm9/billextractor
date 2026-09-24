@@ -6,9 +6,9 @@
 <title>Bill Manager</title>
 <style>
   :root {
-    --bg: #f5f6f8; --card: #ffffff; --border: #e2e5ea; --text: #1f2430;
-    --muted: #6b7280; --accent: #2f6fed; --accent-dark: #1f4fbf;
-    --good: #1a9c5c; --bad: #d1483f; --radius: 10px;
+    --bg: #f7f3ff; --card: #ffffff; --border: #ddd2f2; --text: #241b35;
+    --muted: #6f6480; --accent: #7c3aed; --accent-dark: #5b21b6;
+    --good: #15803d; --bad: #c2410c; --radius: 10px;
   }
   * { box-sizing: border-box; }
   body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); }
@@ -20,8 +20,14 @@
   .field input, .field select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
   .btn { display:inline-block; padding: 10px 16px; border-radius: 8px; border: none; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   .btn:hover { background: var(--accent-dark); }
-  .btn.secondary { background: #eef1f6; color: var(--text); }
-  .btn.secondary:hover { background: #e2e6ee; }
+  .btn.secondary { background: #f1ebff; color: #4c1d95; }
+  .btn.secondary:hover { background: #e9ddff; }
+  .btn.danger { background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; }
+  .btn.danger:hover { background: #ffe4e6; }
+  .btn.outline { background: #fff; color: var(--accent); border: 1px solid #c4b5fd; }
+  .btn.outline:hover { background: #f5f3ff; }
+  .detail-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .verifyCheckbox { width:18px; height:18px; accent-color: var(--accent); cursor:pointer; }
   .btn.full { width: 100%; }
   .btn.small { padding: 6px 10px; font-size: 12px; }
   .link-btn { background:none; border:none; color: var(--accent); cursor:pointer; font-size: 13px; padding:0; }
@@ -57,7 +63,7 @@
   .totals div { display:flex; justify-content:space-between; padding: 2px 0; }
 
   #uploadArea { border: 2px dashed var(--border); border-radius: var(--radius); padding: 24px; text-align:center; cursor:pointer; }
-  #uploadArea.dragover { border-color: var(--accent); background: #f0f5ff; }
+  #uploadArea.dragover { border-color: var(--accent); background: #f5f3ff; }
   #uploadArea p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
   #previewImg { max-width: 100%; max-height: 160px; border-radius: 8px; margin-top: 10px; }
 
@@ -406,6 +412,9 @@ async function toggleDetail(id) {
 }
 
 function renderDetail(container, bill, items) {
+  const originalVerification = {};
+  items.forEach((it) => { originalVerification[it.id] = !!it.physically_verified; });
+
   container.innerHTML = `
     <div class="muted" style="font-size:13px;">Bill #${bill.invoice_number || '—'}</div>
     <table>
@@ -426,26 +435,142 @@ function renderDetail(container, bill, items) {
       <div><span>GST</span><span>₹${Number(bill.gst || 0).toFixed(2)}</span></div>
       <div><span>Total</span><span>₹${Number(bill.total || 0).toFixed(2)}</span></div>
     </div>
+    <div class="detail-actions">
+      <button class="btn small" data-action="verify">✓ Verify</button>
+      <button class="btn small danger" data-action="cancel">Cancel</button>
+      <button class="btn small outline" data-action="export">Export PDF</button>
+    </div>
   `;
 
+  // Checking/unchecking a checkbox no longer collapses the bill.
+  // Verification is saved only when the user explicitly clicks Verify.
   container.querySelectorAll('tr[data-item]').forEach((tr) => {
     const itemId = tr.dataset.item;
-    tr.querySelector('.verifyCheckbox').addEventListener('change', async (e) => {
-      try {
-        await api('bills-verify', { method: 'POST', body: JSON.stringify({ itemId, verified: e.target.checked }) });
-        showToast('Verification updated');
-        runSearch(); // refresh badges
-      } catch (err) { showToast('Failed: ' + err.message); }
-    });
+
     tr.querySelector('.sellPriceInput').addEventListener('change', async (e) => {
       const val = parseFloat(e.target.value);
       if (isNaN(val)) return;
       try {
         await api('items-price', { method: 'POST', body: JSON.stringify({ itemId, sellingPrice: val }) });
         showToast('Selling price saved');
-      } catch (err) { showToast('Failed: ' + err.message); }
+      } catch (err) {
+        showToast('Failed: ' + err.message);
+      }
     });
   });
+
+  container.querySelector('[data-action="verify"]').addEventListener('click', async () => {
+    const changes = [];
+    container.querySelectorAll('tr[data-item]').forEach((tr) => {
+      const itemId = tr.dataset.item;
+      const verified = tr.querySelector('.verifyCheckbox').checked;
+      if (verified !== originalVerification[itemId]) {
+        changes.push({ itemId, verified });
+      }
+    });
+
+    try {
+      for (const change of changes) {
+        await api('bills-verify', {
+          method: 'POST',
+          body: JSON.stringify(change)
+        });
+      }
+      showToast(changes.length ? 'Verification updated' : 'Bill verified');
+
+      // Collapse only because the user explicitly clicked Verify.
+      container.classList.add('hidden');
+      expandedBillId = null;
+      await runSearch();
+    } catch (err) {
+      showToast('Failed: ' + err.message);
+    }
+  });
+
+  container.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+    container.querySelectorAll('tr[data-item]').forEach((tr) => {
+      const itemId = tr.dataset.item;
+      tr.querySelector('.verifyCheckbox').checked = originalVerification[itemId];
+    });
+
+    // Collapse only because the user explicitly clicked Cancel.
+    container.classList.add('hidden');
+    expandedBillId = null;
+  });
+
+  container.querySelector('[data-action="export"]').addEventListener('click', () => {
+    exportBillToPdf(bill, items);
+  });
+}
+
+function exportBillToPdf(bill, items) {
+  // Native browser print-to-PDF: choose "Save as PDF" in the print dialog.
+  const rows = items.map((it) => `
+    <tr>
+      <td>${escapeHtml(it.name || '')}</td>
+      <td>${it.quantity ?? '—'} ${escapeHtml(it.unit || '')}</td>
+      <td>₹${Number(it.unit_price || 0).toFixed(2)}</td>
+      <td>₹${Number(it.selling_price || 0).toFixed(2)}</td>
+      <td>${it.physically_verified ? 'Verified' : 'Not verified'}</td>
+    </tr>
+  `).join('');
+
+  const printWindow = window.open('', '_blank', 'width=900,height=700');
+  if (!printWindow) {
+    showToast('Please allow pop-ups to export the PDF');
+    return;
+  }
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Bill ${escapeHtml(bill.invoice_number || bill.id || '')}</title>
+      <style>
+        @page { size: A4; margin: 16mm; }
+        body { font-family: Arial, sans-serif; color:#241b35; font-size:12px; }
+        h1 { color:#6d28d9; margin:0 0 6px; }
+        .meta { margin-bottom:18px; line-height:1.6; }
+        table { width:100%; border-collapse:collapse; margin-top:15px; }
+        th,td { border:1px solid #ddd2f2; padding:8px; text-align:left; }
+        th { background:#f1ebff; color:#4c1d95; }
+        .totals { margin-top:15px; margin-left:auto; width:260px; }
+        .totals div { display:flex; justify-content:space-between; padding:4px 0; }
+        .total { font-weight:bold; border-top:2px solid #7c3aed; padding-top:7px !important; }
+      </style>
+    </head>
+    <body>
+      <h1>Bill Manager</h1>
+      <div class="meta">
+        <strong>Vendor:</strong> ${escapeHtml(bill.vendor_name || '—')}<br>
+        <strong>Date:</strong> ${escapeHtml(bill.purchase_date || '—')}<br>
+        <strong>Invoice #:</strong> ${escapeHtml(bill.invoice_number || '—')}
+      </div>
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Qty</th><th>Purchase ₹</th><th>Selling ₹</th><th>Status</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="totals">
+        <div><span>GST</span><span>₹${Number(bill.gst || 0).toFixed(2)}</span></div>
+        <div class="total"><span>Total</span><span>₹${Number(bill.total || 0).toFixed(2)}</span></div>
+      </div>
+      <script>
+        window.onload = function() {
+          setTimeout(function() { window.print(); }, 250);
+        };
+      <\/script>
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
 }
 </script>
 </body>
