@@ -499,21 +499,30 @@ function renderDetail(container, bill, items) {
   });
 
   container.querySelector('[data-action="export"]').addEventListener('click', () => {
-    exportBillToPdf(bill, items);
+    exportBillToPdf(bill, items, container);
   });
 }
 
-function exportBillToPdf(bill, items) {
+function exportBillToPdf(bill, items, container) {
   // Native browser print-to-PDF: choose "Save as PDF" in the print dialog.
-  const rows = items.map((it) => `
-    <tr>
-      <td>${escapeHtml(it.name || '')}</td>
-      <td>${it.quantity ?? '—'} ${escapeHtml(it.unit || '')}</td>
-      <td>₹${Number(it.unit_price || 0).toFixed(2)}</td>
-      <td>₹${Number(it.selling_price || 0).toFixed(2)}</td>
-      <td>${it.physically_verified ? 'Verified' : 'Not verified'}</td>
-    </tr>
-  `).join('');
+  // Use the current text-box value so a blank Selling Price stays blank in the PDF.
+  const rows = items.map((it) => {
+    const input = container?.querySelector(`tr[data-item="${it.id}"] .sellPriceInput`);
+    const sellingValue = input ? input.value.trim() : (it.selling_price ?? '');
+    const sellingCell = sellingValue === ''
+      ? '<td class="manual-price"></td>'
+      : `<td>₹${Number(sellingValue).toFixed(2)}</td>`;
+
+    return `
+      <tr>
+        <td>${escapeHtml(it.name || '')}</td>
+        <td>${it.quantity ?? '—'} ${escapeHtml(it.unit || '')}</td>
+        <td>₹${Number(it.unit_price || 0).toFixed(2)}</td>
+        ${sellingCell}
+        <td>${it.physically_verified ? 'Verified' : 'Not verified'}</td>
+      </tr>
+    `;
+  }).join('');
 
   const printWindow = window.open('', '_blank', 'width=900,height=700');
   if (!printWindow) {
@@ -534,6 +543,7 @@ function exportBillToPdf(bill, items) {
         table { width:100%; border-collapse:collapse; margin-top:15px; }
         th,td { border:1px solid #ddd2f2; padding:8px; text-align:left; }
         th { background:#f1ebff; color:#4c1d95; }
+        .manual-price { height:32px; min-width:90px; }
         .totals { margin-top:15px; margin-left:auto; width:260px; }
         .totals div { display:flex; justify-content:space-between; padding:4px 0; }
         .total { font-weight:bold; border-top:2px solid #7c3aed; padding-top:7px !important; }
