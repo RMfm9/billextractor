@@ -173,27 +173,101 @@ function fileToBase64(file) {
 
 async function handleFile(file) {
   lastFile = file;
-  if (file.type.startsWith('image/')) {
-    $('#previewImg').src = URL.createObjectURL(file);
-    $('#previewImg').classList.remove('hidden');
-  } else {
-    $('#previewImg').classList.add('hidden');
-  }
-  $('#scanStatus').textContent = 'Scanning with Azure Document Intelligence… this can take up to ~30s.';
+  $('#previewImg').classList.add('hidden');
   $('#reviewSection').classList.add('hidden');
 
+  let toSend = file;
+
+  if (file.type.startsWith('image/')) {
+    $('#scanStatus').textContent = 'Compressing image…';
+    try {
+      toSend = await compressImageFile(file);
+    } catch (err) {
+      console.error('Compression failed, using original file', err);
+    }
+    $('#previewImg').src = URL.createObjectURL(toSend);
+    $('#previewImg').classList.remove('hidden');
+  } else if (file.type === 'application/pdf' && file.size > 4 * 1024 * 1024) {
+    $('#scanStatus').textContent =
+      'This PDF is large and may fail to upload (only images are auto-compressed). ' +
+      'If it fails, try a photo of the bill instead, or a smaller PDF.';
+  }
+
+  const sizeNote = toSend !== file
+    ? ` (compressed from ${(file.size / 1024 / 1024).toFixed(1)}MB to ${(toSend.size / 1024).toFixed(0)}KB)`
+    : '';
+  $('#scanStatus').textContent = 'Scanning with Azure Document Intelligence…' + sizeNote;
+
   try {
-    const fileBase64 = await fileToBase64(file);
+    const fileBase64 = await fileToBase64(toSend);
     const data = await api('scan-bill', {
       method: 'POST',
-      body: JSON.stringify({ fileBase64, contentType: file.type }),
+      body: JSON.stringify({ fileBase64, contentType: toSend.type }),
     });
     extractedData = data.extracted;
-    $('#scanStatus').textContent = 'Extraction complete. Review and edit below before saving.';
+    $('#scanStatus').textContent = 'Extraction complete. Review and edit below before saving.' + sizeNote;
     populateReview(extractedData);
   } catch (err) {
     $('#scanStatus').textContent = 'Scan failed: ' + err.message;
   }
+}
+
+// Compresses any image down to a safe upload size, no matter how large the
+// original is. Vercel's request body limit is ~4.5MB and base64 inflates a
+// file by ~33%, so we target well under that. Repeatedly lowers JPEG
+// quality first, then shrinks pixel dimensions if quality alone isn't
+// enough, until the result is under maxBytes.
+async function compressImageFile(file, maxBytes = 2.5 * 1024 * 1024, maxDimension = 2200) {
+  const img = await loadImageFromFile(file);
+  let width = img.naturalWidth;
+  let height = img.naturalHeight;
+
+  if (width > maxDimension || height > maxDimension) {
+    const scale = maxDimension / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  let quality = 0.9;
+  let blob = await drawToJpegBlob(img, width, height, quality);
+
+  while (blob.size > maxBytes && quality > 0.35) {
+    quality -= 0.1;
+    blob = await drawToJpegBlob(img, width, height, quality);
+  }
+
+  while (blob.size > maxBytes && width > 600 && height > 600) {
+    width = Math.round(width * 0.85);
+    height = Math.round(height * 0.85);
+    blob = await drawToJpegBlob(img, width, height, quality);
+  }
+
+  const newName = file.name.replace(/\.\w+$/, '') + '.jpg';
+  return new File([blob], newName, { type: 'image/jpeg' });
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Could not read this image file'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function drawToJpegBlob(img, width, height, quality) {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Compression failed'))),
+      'image/jpeg',
+      quality
+    );
+  });
 }
 
 function populateReview(d) {
